@@ -32,13 +32,47 @@ CHIP CPU {
         pc[15];          // address of next instruction
 
     PARTS:
-	Mux16(a=instruction , b=ALUout , sel=instruction[15] , out=AMuxOut );
+    // === INSTRUCTION DECODE ===
+    // Select between A-instruction (value) and C-instruction (ALU output)
+    Mux16(a=instruction , b=outALU , sel=instruction[15] , out=AMuxOut );
     Not(in=instruction[15] , out=isAInstruction );
+    Not(in=isAInstruction, out=isCInstruction);
+
+    // === A REGISTER ===
+    // Load if A-instruction OR C-instruction with dest bit 5 set
     Or(a=isAInstruction , b=instruction[5] , out=loadA );
-    ARegister(in=AMuxOut, load=loadA, out=adressM );
-    Mux16(a=adressM , b=inM , sel=instruction[12] , out=YOut );
-    ALU(x=DRegOut , y=YOut , zx=instruction[11], nx=instruction[10], zy=instruction[9], ny=instruction[8], f=instruction[7], no=instruction[6], out=outM , zr=ALUZero , ng=ALUNegative );
-    DRegister(in=outM , load=instruction[4] , out=DRegOut );
+    ARegister(in=AMuxOut, load=loadA, out[0..14]=addressM, out=ARegOut );
+
+    // === ALU ===
+    // Select memory or A register as Y input (instruction[12] = comp bit)
+    Mux16(a=ARegOut , b=inM , sel=instruction[12] , out=YOut );
+    ALU(x=DRegOut , y=YOut , zx=instruction[11], nx=instruction[10], zy=instruction[9], ny=instruction[8], f=instruction[7], no=instruction[6], out=outM, out=outALU, zr=ALUZero , ng=ALUNegative );
+
+    // === D REGISTER ===
+    // Only load on C-instruction with dest bit 4 set
+    And(a=instruction[4] , b=isCInstruction , out=loadD );
+    DRegister(in=outALU , load=loadD , out=DRegOut );
+
+    // === MEMORY WRITE ===
+    // Only write on C-instruction with dest bit 3 set
     And(a=instruction[15] , b=instruction[3] , out=writeM );
-    PC(in= , load= , inc= , reset=reset , out=pc );
+
+    // === JUMP LOGIC ===
+    // Determine ALU output condition
+    Not(in=ALUZero , out=ALUNotZero);
+    Not(in=ALUNegative , out=ALUNotNegative);
+    And(a=ALUNotZero , b=ALUNotNegative , out=ALUPositive);
+
+    // Check each jump bit against ALU condition
+    And(a=instruction[0] , b=ALUPositive, out=jumpJ0 );  // JGT
+    And(a=instruction[1] , b=ALUZero , out=jumpJ1 );     // JEQ
+    And(a=instruction[2] , b=ALUNegative , out=jumpJ2 ); // JLT
+
+    // Jump if any condition met, but only on C-instruction
+    Or(a=jumpJ0 , b=jumpJ1 , out=jumpJ0or1 );
+    Or(a=jumpJ0or1 , b=jumpJ2 , out=jump );
+    And(a=isCInstruction , b=jump, out=shouldJump );
+
+    // === PROGRAM COUNTER ===
+    PC(in=ARegOut, load=shouldJump , inc=true , reset=reset , out[0..14]=pc );
 }
