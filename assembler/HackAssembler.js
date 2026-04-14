@@ -1,5 +1,7 @@
 const fs = require('node:fs/promises');
 
+const fileName = process.argv[2];
+
 const symbolTable = {
   'R0': 0,
   'R1': 1,
@@ -91,33 +93,47 @@ const addFullBits = (value) => {
 async function parser() {
   try {
     // read file and remove comments and empty lines
-    const data = await fs.readFile('./test-files/Add.asm', { encoding: 'utf8' });
+    const data = await fs.readFile(`./test-files/${fileName}.asm`, { encoding: 'utf8' });
     const lines = data.split('\n')
+    .map(line => line.trim())
     .filter(line => line.trim() !== '')
     .filter(line => !line.startsWith('//'))
     .filter(line => !line.startsWith('/*'))
     .filter(line => !line.startsWith('*'))
     .map(line => {
+      console.log("line", line);
       const [instruction, ...args] = line.split(' ');
       return instruction;
     });
     console.log("lines", lines);
     // handle A instructions
-    const aInstructions = lines.map(line => {
+    const aInstructions = lines.map((line, index) => {
       if (line.startsWith('@')) {
         const instructionValue = line.slice(1);
+        console.log("instructionValue", instructionValue);
         if (!Number.isNaN(instructionValue)) {
           console.log("instructionValue toasty", instructionValue);
           return addFullBits(Number(instructionValue).toString(2));
+        } else {
+          console.log("ahhhhhh");
+          if (symbolTable.hasOwnProperty(instructionValue)) {
+            console.log("symbolTable[instructionValue]", symbolTable[instructionValue]);
+            return addFullBits(symbolTable[instructionValue].toString(2));
+          } else {
+            symbolTable[instructionValue] = index;
+          }
         }
+      } else if (line.startsWith('(')) {
+        const symbol = line.split('(')[1].split(')')[0];
+        symbolTable[symbol] = index;
+        return line;
       } else {
         return line;
       }
     });
     console.log("aInstructions", aInstructions);
-
     // handle C instructions
-    const cInstructions = aInstructions.map(line => {
+    const cInstructions = aInstructions.map((line, index) => {
       if (/^.+=.+$/.test(line)) {
         // get dest and comp values
         const [dest, comp] = line.split('=');
@@ -127,13 +143,21 @@ async function parser() {
         jumpValue = jumpValue ? jumpValue : '';
         // return the c instruction
         return `111${compTable[compValue]}${destTable[dest]}${jumpTable[jumpValue]}`;
+        } else if (/^.+;.+$/.test(line)) {
+        // get comp and jump values
+        let [compValue, jumpValue] = line.split(';');
+        // if jump value is not present, set it to empty string
+        jumpValue = jumpValue ? jumpValue : '';
+        // return the c instruction
+        return `111${compTable[compValue]}${destTable['']}${jumpTable[jumpValue]}`;
       } else {
         return line;
       }
     });
     console.log("cInstructions", cInstructions);
+    console.log("symbolTable", symbolTable);
     // write the instructions to a file
-    await fs.writeFile('./test-files/Add.hack', cInstructions.join('\n'));
+    await fs.writeFile(`./test-files/${fileName}.hack`, cInstructions.join('\n'));
   } catch (err) {
     console.error(err);
   }
