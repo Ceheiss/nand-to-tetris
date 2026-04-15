@@ -81,11 +81,6 @@ const jumpTable = {
   'JMP': '111',
 }
 
-// need to keep track of the memory counter to add to the symbol table
-let memoryCounter = 16;
-// need to keep track of the instruction counter to add to the symbol table
-let instructionCounter = 0;
-
 // pad the value with zeros to make it 16 bits
 const addFullBits = (value) => {
   const extraZeros = 16 - value.length;
@@ -95,85 +90,99 @@ const addFullBits = (value) => {
   return value;
 }
 
-async function parser() {
-  try {
-    // read file and remove comments and empty lines
-    const data = await fs.readFile(`./test-files/${fileName}.asm`, { encoding: 'utf8' });
-    const lines = data.split('\n')
+const cleanLines = (data) => {
+  return data.split('\n')
     .map(line => line.trim())
     .filter(line => line.trim() !== '')
     .filter(line => !line.startsWith('//'))
     .filter(line => !line.startsWith('/*'))
     .filter(line => !line.startsWith('*'))
     .map(line => {
-      console.log("line", line);
       const [instruction, ...args] = line.split(' ');
       return instruction;
-    })
-    .map((line, index) => {
-      if (line.startsWith('(')) {
-        const symbol = line.split('(')[1].split(')')[0];
-        console.log(`adding symbol ${symbol} to symbol table at index ${index}`);
-        symbolTable[symbol] = instructionCounter;
-      } else {
-        instructionCounter++;
-        return line;
-      }
-    })
-    .filter(line => line !== undefined);
-    console.log("lines ++++++", lines);
-    console.log(symbolTable)
-    // handle A instructions
-    const aInstructions = lines.map((line, index) => {
-      if (line.startsWith('@')) {
-        const instructionValue = line.slice(1);
-        // run if value is a number
-        if (!isNaN(Number(instructionValue))) {
-          return addFullBits(Number(instructionValue).toString(2));
-        } else {
-          // if not a number, its a symbol
-          // check if symbol is in symbol table
-          if (symbolTable.hasOwnProperty(instructionValue)) {
-            // if it is, return the value
-            return addFullBits(symbolTable[instructionValue].toString(2));
-          } else {
-            // if not, add it to symbol table
-            symbolTable[instructionValue] = memoryCounter;
-            memoryCounter++;
-            return addFullBits(symbolTable[instructionValue].toString(2));
-          }
-        }
-      } else {
-        console.log("QUE HAGO AKIII",  line);
-        return line;
-      }
     });
-    console.log("aInstructions", aInstructions);
-    // handle C instructions
-    const cInstructions = aInstructions.map((line, index) => {
-      if (/^.+=.+$/.test(line)) {
-        // get dest and comp values
-        const [dest, comp] = line.split('=');
-        // get comp and jump values
-        let [compValue, jumpValue] = comp.split(';');
-        // if jump value is not present, set it to empty string
-        jumpValue = jumpValue ? jumpValue : '';
-        // return the c instruction
-        return `111${compTable[compValue]}${destTable[dest]}${jumpTable[jumpValue]}`;
-        } else if (/^.+;.+$/.test(line)) {
-        // get comp and jump values
-        let [compValue, jumpValue] = line.split(';');
-        // if jump value is not present, set it to empty string
-        jumpValue = jumpValue ? jumpValue : '';
-        // return the c instruction
-        return `111${compTable[compValue]}${destTable['']}${jumpTable[jumpValue]}`;
-      } else {
-        return line;
-      }
-    });
+}
 
+const extractLabels = (lines) => {
+  // need to keep track of the instruction counter to add to the symbol table
+  let instructionCounter = 0;
+  return lines.map(line => {
+    if (line.startsWith('(')) {
+      const symbol = line.split('(')[1].split(')')[0];
+      symbolTable[symbol] = instructionCounter;
+    } else {
+      instructionCounter++;
+      return line;
+    }
+  })
+  .filter(line => line !== undefined);
+}
+
+const translateAInstructions = (labeledLines) => {
+  // need to keep track of the memory counter to add to the symbol table
+  let memoryCounter = 16;
+  return labeledLines.map((line) => {
+    if (line.startsWith('@')) {
+      const instructionValue = line.slice(1);
+      // run if value is a number
+      if (!isNaN(Number(instructionValue))) {
+        return addFullBits(Number(instructionValue).toString(2));
+      } else {
+        // if not a number, its a symbol
+        // check if symbol is in symbol table
+        if (symbolTable.hasOwnProperty(instructionValue)) {
+          // if it is, return the value
+          return addFullBits(symbolTable[instructionValue].toString(2));
+        } else {
+          // if not, add it to symbol table
+          symbolTable[instructionValue] = memoryCounter;
+          memoryCounter++;
+          return addFullBits(symbolTable[instructionValue].toString(2));
+        }
+      }
+    } else {
+      return line;
+    }
+  });
+}
+
+const translateCInstructions = (aInstructions) => {
+  return aInstructions.map((line) => {
+    // regex to check if line is a c instruction
+    if (/^.+=.+$/.test(line)) {
+      // get destination and computation values
+      const [dest, comp] = line.split('=');
+      // get comp and jump values
+      let [compValue, jumpValue] = comp.split(';');
+      // if jump value is not present, set it to empty string
+      jumpValue = jumpValue ? jumpValue : '';
+      // return the c instruction
+      return `111${compTable[compValue]}${destTable[dest]}${jumpTable[jumpValue]}`;
+      // if instruction is just a jump
+      } else if (/^.+;.+$/.test(line)) {
+      // get comp and jump values
+      let [compValue, jumpValue] = line.split(';');
+      // if jump value is not present, set it to empty string
+      jumpValue = jumpValue ? jumpValue : '';
+      // return the c instruction
+      return `111${compTable[compValue]}${destTable['']}${jumpTable[jumpValue]}`;
+    } else {
+      return line;
+    }
+  });
+}
+
+
+async function parser() {
+  try {
+    // read file and remove comments and empty lines
+    const data = await fs.readFile(`./test-files/${fileName}.asm`, { encoding: 'utf8' });
+    const lines = cleanLines(data);
+    const labeledLines = extractLabels(lines);
+    const aInstructions = translateAInstructions(labeledLines);
+    const translatedInstructions = translateCInstructions(aInstructions);
     // write the instructions to a file
-    await fs.writeFile(`./test-files/${fileName}.hack`, cInstructions.join('\n'));
+    await fs.writeFile(`./test-files/${fileName}.hack`, translatedInstructions.join('\n'));
   } catch (err) {
     console.error(err);
   }
