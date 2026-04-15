@@ -81,6 +81,11 @@ const jumpTable = {
   'JMP': '111',
 }
 
+// need to keep track of the memory counter to add to the symbol table
+let memoryCounter = 16;
+// need to keep track of the instruction counter to add to the symbol table
+let instructionCounter = 0;
+
 // pad the value with zeros to make it 16 bits
 const addFullBits = (value) => {
   const extraZeros = 16 - value.length;
@@ -104,30 +109,42 @@ async function parser() {
       console.log("line", line);
       const [instruction, ...args] = line.split(' ');
       return instruction;
-    });
-    console.log("lines", lines);
+    })
+    .map((line, index) => {
+      if (line.startsWith('(')) {
+        const symbol = line.split('(')[1].split(')')[0];
+        console.log(`adding symbol ${symbol} to symbol table at index ${index}`);
+        symbolTable[symbol] = instructionCounter;
+      } else {
+        instructionCounter++;
+        return line;
+      }
+    })
+    .filter(line => line !== undefined);
+    console.log("lines ++++++", lines);
+    console.log(symbolTable)
     // handle A instructions
     const aInstructions = lines.map((line, index) => {
       if (line.startsWith('@')) {
         const instructionValue = line.slice(1);
-        console.log("instructionValue", instructionValue);
-        if (!Number.isNaN(instructionValue)) {
-          console.log("instructionValue toasty", instructionValue);
+        // run if value is a number
+        if (!isNaN(Number(instructionValue))) {
           return addFullBits(Number(instructionValue).toString(2));
         } else {
-          console.log("ahhhhhh");
+          // if not a number, its a symbol
+          // check if symbol is in symbol table
           if (symbolTable.hasOwnProperty(instructionValue)) {
-            console.log("symbolTable[instructionValue]", symbolTable[instructionValue]);
+            // if it is, return the value
             return addFullBits(symbolTable[instructionValue].toString(2));
           } else {
-            symbolTable[instructionValue] = index;
+            // if not, add it to symbol table
+            symbolTable[instructionValue] = memoryCounter;
+            memoryCounter++;
+            return addFullBits(symbolTable[instructionValue].toString(2));
           }
         }
-      } else if (line.startsWith('(')) {
-        const symbol = line.split('(')[1].split(')')[0];
-        symbolTable[symbol] = index;
-        return line;
       } else {
+        console.log("QUE HAGO AKIII",  line);
         return line;
       }
     });
@@ -154,8 +171,7 @@ async function parser() {
         return line;
       }
     });
-    console.log("cInstructions", cInstructions);
-    console.log("symbolTable", symbolTable);
+
     // write the instructions to a file
     await fs.writeFile(`./test-files/${fileName}.hack`, cInstructions.join('\n'));
   } catch (err) {
